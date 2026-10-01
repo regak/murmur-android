@@ -1,0 +1,16 @@
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build/
+/captures/
+.externalNativeBuildCPP/
+.cxx/
+local.properties
+*.apk
+*.aab
+
+# sherpa-onnx model assets (large, downloaded not committed)
+app/src/main/assets/sherpa-onnx-*/
+app/src/main/assets/*.onnx
