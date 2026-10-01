@@ -1,5 +1,6 @@
 package ai.pivotstudio.murmur.android.asr
 
+import ai.pivotstudio.murmur.android.core.ModelDownloader
 import android.content.Context
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineMoonshineModelConfig
@@ -17,36 +18,39 @@ import kotlinx.coroutines.withContext
  * fastest of 16 models in the public voiceping.net on-device ASR benchmark).
  *
  * English-only by design for v1 (Swahili/multilingual explicitly deferred,
- * see PLAN.md). Swapping to [MOONSHINE_BASE] for higher accuracy is a
- * one-line [modelDir] change; nothing else in the pipeline needs to know.
+ * see PLAN.md).
  *
- * Model assets are NOT committed to git (too large for the repo) — fetch
- * them per app/src/main/assets/README.md before building.
+ * Model files are NOT bundled in the APK (that made the download ~140MB+
+ * for a ~120MB model that Wispr Flow doesn't even ship, since Wispr Flow
+ * is cloud-based). Instead [ModelDownloader] fetches them into app-private
+ * storage on first launch, and this engine loads from that filesystem path
+ * via sherpa-onnx's `assetManager = null` / file-path constructor mode —
+ * see MainActivity for the download-gate that runs before load().
  */
 class SherpaMoonshineEngine(
     private val context: Context,
-    private val modelDir: String = MOONSHINE_TINY_EN,
 ) : TranscriptionEngine {
 
-    override val name: String = "sherpa-onnx / $modelDir"
+    override val name: String = "sherpa-onnx / moonshine-tiny-en-int8"
 
     private var recognizer: OfflineRecognizer? = null
 
     override suspend fun load() = withContext(Dispatchers.IO) {
+        val modelDir = ModelDownloader(context).moonshineDir.absolutePath
         val config = OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
                 moonshine = OfflineMoonshineModelConfig(
-                    preprocessor = assetPath("preprocess.onnx"),
-                    encoder = assetPath("encode.int8.onnx"),
-                    uncachedDecoder = assetPath("uncached_decode.int8.onnx"),
-                    cachedDecoder = assetPath("cached_decode.int8.onnx"),
+                    preprocessor = "$modelDir/preprocess.onnx",
+                    encoder = "$modelDir/encode.int8.onnx",
+                    uncachedDecoder = "$modelDir/uncached_decode.int8.onnx",
+                    cachedDecoder = "$modelDir/cached_decode.int8.onnx",
                 ),
-                tokens = assetPath("tokens.txt"),
+                tokens = "$modelDir/tokens.txt",
                 numThreads = 2,
                 debug = false,
             ),
         )
-        recognizer = OfflineRecognizer(assetManager = context.assets, config = config)
+        recognizer = OfflineRecognizer(assetManager = null, config = config)
     }
 
     override suspend fun transcribe(pcm16kMono: ShortArray): String = withContext(Dispatchers.Default) {
@@ -67,11 +71,7 @@ class SherpaMoonshineEngine(
         recognizer = null
     }
 
-    private fun assetPath(file: String) = "$modelDir/$file"
-
     companion object {
         const val SAMPLE_RATE_HZ = 16000
-        const val MOONSHINE_TINY_EN = "sherpa-onnx-moonshine-tiny-en-int8"
-        const val MOONSHINE_BASE_EN = "sherpa-onnx-moonshine-base-en-int8"
     }
 }

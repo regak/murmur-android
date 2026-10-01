@@ -1,32 +1,32 @@
 # ASR model assets
 
-Not committed to git (too large). Download before building:
+**These are no longer bundled here or in the APK.** The APK download was
+~140-230MB when the models were bundled as Android assets — multiple times
+larger than Wispr Flow's APK (~35-57MB), because Wispr Flow ships *zero*
+model weights (it streams audio to a cloud Whisper endpoint; this app is
+on-device/offline by design and has no server to call).
 
-```bash
-cd app/src/main/assets
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2
-tar xvf sherpa-onnx-moonshine-tiny-en-int8.tar.bz2
-rm sherpa-onnx-moonshine-tiny-en-int8.tar.bz2
-```
+The fix: `ModelDownloader` (`core/ModelDownloader.kt`) fetches these files
+into app-private storage (`context.filesDir/models/...`) on first launch
+instead, from this repo's GitHub Release `models-v1`:
+https://github.com/regak/murmur-android/releases/tag/models-v1
 
-Expected contents of `sherpa-onnx-moonshine-tiny-en-int8/`:
+This keeps the APK itself small (no model weights inside it) while keeping
+transcription on-device after the one-time ~120MB download — the same
+trick most on-device AI apps use (ML Kit downloadable modules, etc.).
 
-- `preprocess.onnx`
-- `encode.int8.onnx`
-- `uncached_decode.int8.onnx`
-- `cached_decode.int8.onnx`
-- `tokens.txt`
+## For local dev/testing without rebuilding ModelDownloader's URLs
 
-Total ~119 MB. For the higher-accuracy Base variant (~290 MB), swap
-`tiny` for `base` in the URL and pass `modelDir = SherpaMoonshineEngine.MOONSHINE_BASE_EN`.
+If you want the old bundled-in-APK behavior back (e.g. for an offline
+build with no network at all), the files `ModelDownloader` expects are the
+same ones previously vendored here:
 
-## VAD model (Silero, for SpeechSegmenter)
+- `sherpa-onnx-moonshine-tiny-en-int8/{preprocess,encode.int8,uncached_decode.int8,cached_decode.int8}.onnx` + `tokens.txt` (~119MB)
+- `vad/silero_vad.onnx` (~643KB)
 
-```bash
-cd app/src/main/assets
-mkdir -p vad && cd vad
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
-```
+Source: https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2
+and https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
 
-~2.2 MB. Used by `SpeechSegmenter` to trim leading/trailing silence from the
-held-button recording before it reaches Moonshine.
+For the higher-accuracy Moonshine Base variant (~290MB) instead of Tiny,
+swap the model files and the `OfflineMoonshineModelConfig` paths in
+`SherpaMoonshineEngine.kt` — same interface, no other code changes needed.

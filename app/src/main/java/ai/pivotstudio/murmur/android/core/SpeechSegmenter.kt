@@ -17,14 +17,17 @@ import android.content.Context
  * This also lays the groundwork for a later "tap to start, auto-stop on
  * silence" trigger mode (Phase 3 settings), which needs exactly this speech/
  * silence segmentation rather than a manual release.
+ * Model file is NOT bundled in the APK — [ModelDownloader] fetches it on
+ * first launch alongside the Moonshine ASR files. See that class and
+ * MainActivity's download-gate for details.
  */
 class SpeechSegmenter(context: Context) {
 
     private val vad: Vad = Vad(
-        assetManager = context.assets,
+        assetManager = null,
         config = VadModelConfig(
             sileroVadModelConfig = SileroVadModelConfig(
-                model = "$VAD_ASSET_DIR/silero_vad.onnx",
+                model = "${ModelDownloader(context).vadDir.absolutePath}/silero_vad.onnx",
                 threshold = 0.5f,
                 minSilenceDuration = 0.25f,
                 minSpeechDuration = 0.1f,
@@ -85,6 +88,5 @@ class SpeechSegmenter(context: Context) {
     companion object {
         const val SAMPLE_RATE_HZ = 16000
         const val WINDOW_SIZE_SAMPLES = 512
-        const val VAD_ASSET_DIR = "vad"
     }
 }

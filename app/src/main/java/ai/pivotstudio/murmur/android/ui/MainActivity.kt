@@ -3,16 +3,21 @@ package ai.pivotstudio.murmur.android.ui
 import ai.pivotstudio.murmur.android.asr.SherpaMoonshineEngine
 import ai.pivotstudio.murmur.android.core.AudioCapture
 import ai.pivotstudio.murmur.android.core.DictationController
+import ai.pivotstudio.murmur.android.core.ModelDownloader
 import ai.pivotstudio.murmur.android.core.SpeechSegmenter
 import android.Manifest
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -32,6 +37,14 @@ import kotlinx.coroutines.launch
  * to transcribe. Output goes to Logcat (tag "Murmur/Dictation") and is also
  * mirrored on-screen for convenience during bring-up.
  *
+ * First launch runs a download gate: [ModelDownloader] fetches the ~120MB
+ * Moonshine + Silero VAD model files from the repo's GitHub Release into
+ * app-private storage, so the APK itself stays small to download (matching
+ * Wispr Flow's small-APK feel, even though — unlike Wispr Flow — this app's
+ * transcription stays fully on-device/offline after that one-time fetch).
+ * Subsequent launches skip straight to loading since the files already
+ * exist on disk (see [ModelDownloader.isComplete]).
+ *
  * This is NOT the shipping UI (no overlay bubble, no background service) —
  * see PLAN.md Phase 1 item 6 for what "done" means here, and Phase 2 for
  * the real floating-bubble + IME trigger.
@@ -39,7 +52,8 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private lateinit var controller: DictationController
-    private var statusText = mutableStateOf("Grant mic permission to begin")
+    private var statusText = mutableStateOf("Preparing...")
+    private var downloadProgress = mutableStateOf<Float?>(null)
 
     private val requestMicPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -53,9 +67,30 @@ class MainActivity : ComponentActivity() {
         val audioCapture = AudioCapture(this)
         val engine = SherpaMoonshineEngine(this)
         val segmenter = SpeechSegmenter(this)
+        val downloader = ModelDownloader(this)
         controller = DictationController(audioCapture, engine, segmenter)
 
         lifecycleScope.launch {
+            if (!downloader.isComplete()) {
+                statusText.value = "Downloading speech model (~120MB, one-time)..."
+                try {
+                    downloader.ensureDownloaded { progress ->
+                        val fraction = if (progress.bytesTotal > 0) {
+                            progress.bytesDone.toFloat() / progress.bytesTotal.toFloat()
+                        } else {
+                            0f
+                        }
+                        downloadProgress.value = fraction
+                        statusText.value =
+                            "Downloading model ${progress.fileIndex}/${progress.fileCount}: ${progress.fileName}"
+                    }
+                } catch (e: Exception) {
+                    Log.e("Murmur/Download", "Model download failed", e)
+                    statusText.value = "Download failed: ${e.message}. Check connection and reopen the app."
+                    return@launch
+                }
+            }
+            downloadProgress.value = null
             statusText.value = "Loading Moonshine Tiny EN..."
             engine.load()
             statusText.value = if (audioCapture.hasMicPermission()) {
@@ -71,6 +106,7 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     DictationScreen(
                         status = statusText.value,
+                        downloadProgress = downloadProgress.value,
                         onPressStart = { controller.startListening(lifecycleScope) },
                         onPressEnd = { controller.stopListening() },
                     )
@@ -83,6 +119,7 @@ class MainActivity : ComponentActivity() {
 @androidx.compose.runtime.Composable
 private fun DictationScreen(
     status: String,
+    downloadProgress: Float?,
     onPressStart: () -> Unit,
     onPressEnd: () -> Unit,
 ) {
@@ -92,7 +129,8 @@ private fun DictationScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp)
-            .pointerInput(Unit) {
+            .pointerInput(downloadProgress) {
+                if (downloadProgress != null) return@pointerInput
                 detectTapGestures(
                     onPress = {
                         isHeld = true
@@ -105,6 +143,14 @@ private fun DictationScreen(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(text = if (isHeld) "Listening... release to transcribe" else status)
+        Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(text = if (isHeld) "Listening... release to transcribe" else status)
+            if (downloadProgress != null) {
+                LinearProgressIndicator(
+                    progress = { downloadProgress },
+                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                )
+            }
+        }
     }
 }

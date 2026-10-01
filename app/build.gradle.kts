@@ -17,11 +17,12 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Restrict to arm64-v8a for the sideload build — nearly every phone
-        // sold since ~2017 is arm64. Cuts the APK from ~233MB (4 ABIs' worth
-        // of sherpa-onnx/onnxruntime .so files) to a size that fits normal
-        // file-transfer limits. Drop this filter for a Play-Store multi-ABI
-        // release build later.
+        // Restrict to arm64-v8a: onnxruntime's native .so is ~30MB per ABI,
+        // so shipping all 4 ABIs balloons the APK back to ~130MB even with
+        // no models bundled. arm64-v8a alone covers virtually every phone
+        // sold since ~2017. Drop this filter only for a Play Store release
+        // using Play App Bundle, which serves each device its own ABI slice
+        // automatically instead of bloating one universal APK.
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

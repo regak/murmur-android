@@ -22,8 +22,11 @@ Goal: hold overlay button → talk → see transcript in Logcat. No injection ye
 1. Gradle scaffold: Kotlin, Jetpack Compose, min SDK 26, target latest stable.
 2. `AudioCapture` — `AudioRecord` at 16kHz mono, single-consumer `Channel<ShortArray>`
    (mirrors macOS's "buffers copied, never borrowed" + single-task ordering rule).
-3. [x] Bundle sherpa-onnx VAD (Silero) + Moonshine Tiny EN INT8 model assets
-   — `SpeechSegmenter` wraps Silero VAD, trims silence from the held-button
+3. [x] Fetch sherpa-onnx VAD (Silero) + Moonshine Tiny EN INT8 model assets
+   at **runtime, not APK-bundled** — `ModelDownloader` pulls them from a
+   GitHub Release into app-private storage on first launch (~120MB
+   one-time download), so the APK itself stays ~39MB instead of ~140MB+.
+   `SpeechSegmenter` wraps Silero VAD, trims silence from the held-button
    recording before it reaches the ASR engine.
 4. [x] `TranscriptionEngine` interface + `SherpaMoonshineEngine` implementation.
 5. Minimal floating overlay bubble (`TYPE_APPLICATION_OVERLAY`, `FLAG_NOT_FOCUSABLE`
