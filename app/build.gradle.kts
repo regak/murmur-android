@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -15,6 +16,15 @@ android {
         versionName = "0.1.0-phase1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Restrict to arm64-v8a for the sideload build — nearly every phone
+        // sold since ~2017 is arm64. Cuts the APK from ~233MB (4 ABIs' worth
+        // of sherpa-onnx/onnxruntime .so files) to a size that fits normal
+        // file-transfer limits. Drop this filter for a Play-Store multi-ABI
+        // release build later.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -37,10 +47,6 @@ android {
         compose = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -57,8 +63,11 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
 
-    // sherpa-onnx Kotlin bindings (ASR engine: Moonshine Tiny EN INT8)
-    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx:1.13.8")
+    // sherpa-onnx Kotlin bindings (ASR engine: Moonshine Tiny EN INT8).
+    // Not published to Maven Central — shipped as a prebuilt .aar release
+    // asset (bundles its own libonnxruntime.so per-ABI, no separate
+    // onnxruntime dependency needed). See app/libs/README.md.
+    implementation(files("libs/sherpa-onnx-1.13.8.aar"))
 
     // Coroutines — single-consumer Channel for ordered audio buffer draining
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
