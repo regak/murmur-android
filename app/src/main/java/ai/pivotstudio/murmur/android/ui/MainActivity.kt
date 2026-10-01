@@ -3,6 +3,7 @@ package ai.pivotstudio.murmur.android.ui
 import ai.pivotstudio.murmur.android.asr.SherpaMoonshineEngine
 import ai.pivotstudio.murmur.android.core.AudioCapture
 import ai.pivotstudio.murmur.android.core.DictationController
+import ai.pivotstudio.murmur.android.core.SpeechSegmenter
 import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -51,7 +52,8 @@ class MainActivity : ComponentActivity() {
 
         val audioCapture = AudioCapture(this)
         val engine = SherpaMoonshineEngine(this)
-        controller = DictationController(audioCapture, engine)
+        val segmenter = SpeechSegmenter(this)
+        controller = DictationController(audioCapture, engine, segmenter)
 
         lifecycleScope.launch {
             statusText.value = "Loading Moonshine Tiny EN..."

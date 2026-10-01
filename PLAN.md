@@ -22,11 +22,17 @@ Goal: hold overlay button → talk → see transcript in Logcat. No injection ye
 1. Gradle scaffold: Kotlin, Jetpack Compose, min SDK 26, target latest stable.
 2. `AudioCapture` — `AudioRecord` at 16kHz mono, single-consumer `Channel<ShortArray>`
    (mirrors macOS's "buffers copied, never borrowed" + single-task ordering rule).
-3. Bundle sherpa-onnx VAD (Silero) + Moonshine Tiny EN INT8 model assets.
-4. `TranscriptionEngine` interface + `SherpaMoonshineEngine` implementation.
+3. [x] Bundle sherpa-onnx VAD (Silero) + Moonshine Tiny EN INT8 model assets
+   — `SpeechSegmenter` wraps Silero VAD, trims silence from the held-button
+   recording before it reaches the ASR engine.
+4. [x] `TranscriptionEngine` interface + `SherpaMoonshineEngine` implementation.
 5. Minimal floating overlay bubble (`TYPE_APPLICATION_OVERLAY`, `FLAG_NOT_FOCUSABLE`
    — never steals focus, same rule as the macOS HUD) — press-and-hold to record.
-6. Wire mic → VAD → Moonshine → Logcat. This is the proof-of-concept milestone.
+   (`MainActivity`'s in-app press-and-hold is the stand-in for this until the
+   real floating bubble + background service land.)
+6. [x] Wire mic → VAD → Moonshine → Logcat (`DictationController`). This is
+   the proof-of-concept milestone — pending a real device build to confirm
+   it actually runs (no Android SDK/emulator available in this environment).
 
 ## Phase 2 — Text injection
 

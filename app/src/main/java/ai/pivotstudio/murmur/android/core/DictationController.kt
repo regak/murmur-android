@@ -5,17 +5,25 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 
 /**
- * Phase 1 state machine: press-and-hold -> accumulate audio -> release ->
- * transcribe -> log. No text injection yet (that's Phase 2).
+ * Phase 1 state machine: press-and-hold -> accumulate audio -> VAD trims
+ * silence -> release -> transcribe -> log. No text injection yet (Phase 2).
  *
  * Mirrors the macOS `DictationController`'s
  * `starting -> listening -> finishing -> idle` shape, minus the injection step.
+ *
+ * [segmenter] trims leading/trailing silence from the held-button recording
+ * before it reaches the ASR engine (see [SpeechSegmenter] for why — it also
+ * means a user who holds the button, pauses, then talks isn't billed encoder
+ * time for the pause, and doesn't get silence mis-transcribed as noise).
  */
 class DictationController(
     private val audioCapture: AudioCapture,
     private val engine: TranscriptionEngine,
+    private val segmenter: SpeechSegmenter,
 ) {
     enum class State { IDLE, LISTENING, FINISHING }
 
@@ -26,6 +34,7 @@ class DictationController(
     fun startListening(scope: CoroutineScope) {
         check(state == State.IDLE) { "startListening() called while state=$state" }
         state = State.LISTENING
+        segmenter.reset()
 
         val chunks = audioCapture.start(scope)
         val collected = ArrayList<Short>()
@@ -34,11 +43,20 @@ class DictationController(
             chunks.consumeEach { chunk -> collected.addAll(chunk.toList()) }
             // Channel closes when stop() is called (release) — then transcribe.
             state = State.FINISHING
-            val pcm = collected.toShortArray()
-            if (pcm.isEmpty()) {
-                Log.i(TAG, "Silence — nothing to transcribe")
+
+            val raw = collected.toShortArray()
+            val speechOnly = withContext(Dispatchers.Default) {
+                if (raw.isEmpty()) raw else {
+                    segmenter.accept(raw)
+                    segmenter.extractSpeech()
+                }
+            }
+
+            if (speechOnly.isEmpty()) {
+                Log.i(TAG, "No speech detected (silence or button tap too short)")
             } else {
-                val text = engine.transcribe(pcm)
+                Log.i(TAG, "VAD kept ${speechOnly.size}/${raw.size} samples")
+                val text = engine.transcribe(speechOnly)
                 Log.i(TAG, "Transcript: \"$text\"")
                 // Phase 2 TODO: TextFormatter -> TextInjector here.
             }
