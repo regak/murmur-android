@@ -21,15 +21,25 @@ import android.content.Context
  * first launch alongside the Moonshine ASR files. See that class and
  * MainActivity's download-gate for details.
  *
- * Dropped-word fix: Silero VAD (like any VAD) only flags a window as
- * "speech" after enough energy has accumulated across it, so the exact
- * segment boundaries it reports consistently start a bit LATE and end a
- * bit EARLY relative to where the person actually started/stopped talking
- * — typically clipping the first phoneme of the first word and the last
- * consonant of the last word in a segment. [extractSpeech] pads each
- * reported segment with real audio pulled from the original buffer
- * (not silence) on both sides to compensate, then merges any segments
- * whose padded ranges now overlap so padding never duplicates audio.
+ * Dropped-word fixes (two distinct failure modes, both from real-device use):
+ *
+ * 1. Edge clipping: Silero VAD only flags a window as "speech" after enough
+ *    energy has accumulated across it, so segment boundaries consistently
+ *    start a bit LATE and end a bit EARLY — clipping the first phoneme of
+ *    the first word and the last consonant of the last word. Fixed by
+ *    padding [PAD_SAMPLES] of real audio around each detected segment.
+ *
+ * 2. Mid-sentence dropouts on quiet speech: when volume drops mid-sentence
+ *    (a word spoken softly), the VAD can lose the signal for that word
+ *    entirely and read it as a silence gap — splitting one sentence into
+ *    two separate detected segments with a hole where the quiet word was.
+ *    Padding the edges of each segment doesn't help here because that word
+ *    was never classified as speech at all, so there's no segment to pad.
+ *    Fixed by [GAP_BRIDGE_SAMPLES]: if two detected segments are close
+ *    together (a plausible quiet-word gap, not a real pause), the raw
+ *    audio IN the gap is included too rather than discarded, on the
+ *    assumption that genuine pauses between distinct thoughts are usually
+ *    longer than one swallowed word.
  */
 class SpeechSegmenter(context: Context) {
 
@@ -38,8 +48,8 @@ class SpeechSegmenter(context: Context) {
         config = VadModelConfig(
             sileroVadModelConfig = SileroVadModelConfig(
                 model = "${ModelDownloader(context).vadDir.absolutePath}/silero_vad.onnx",
-                threshold = 0.35f,
-                minSilenceDuration = 0.4f,
+                threshold = 0.25f,
+                minSilenceDuration = 0.5f,
                 minSpeechDuration = 0.1f,
                 windowSize = WINDOW_SIZE_SAMPLES,
                 maxSpeechDuration = 30.0f,
@@ -74,10 +84,11 @@ class SpeechSegmenter(context: Context) {
 
     /**
      * Returns the speech portion only, as one concatenated segment, trimming
-     * leading/trailing silence — but padded (see class doc) so the VAD's
-     * typical late-start/early-end clipping doesn't eat real words. Returns
-     * an empty array if VAD found no speech (e.g. the user held the button
-     * but said nothing).
+     * long silences at the edges and between distinct utterances — but
+     * padded and gap-bridged (see class doc) so the VAD's typical
+     * late-start/early-end clipping and quiet-word dropouts don't eat real
+     * words. Returns an empty array if VAD found no speech (e.g. the user
+     * held the button but said nothing).
      */
     fun extractSpeech(): ShortArray {
         // Collect raw (start, end) sample-index ranges from the VAD first —
@@ -93,14 +104,15 @@ class SpeechSegmenter(context: Context) {
         }
         if (ranges.isEmpty()) return ShortArray(0)
 
-        // Merge ranges that now overlap/touch after padding, so we don't
-        // duplicate audio in the overlap when two speech segments were close
-        // together (e.g. a short mid-sentence pause VAD treated as a gap).
+        // Merge ranges that overlap OR are close enough to plausibly be a
+        // quiet word the VAD missed rather than a genuine pause (gap-bridge,
+        // see class doc point 2) — both cases collapse into one range so we
+        // don't duplicate or drop audio in between.
         ranges.sortBy { it.first }
         val merged = ArrayList<IntRange>()
         var current = ranges[0]
         for (next in ranges.drop(1)) {
-            current = if (next.first <= current.last) {
+            current = if (next.first - current.last <= GAP_BRIDGE_SAMPLES) {
                 current.first until maxOf(current.last + 1, next.last + 1)
             } else {
                 merged.add(current)
@@ -136,5 +148,16 @@ class SpeechSegmenter(context: Context) {
          * encoder-time/mis-transcription cost this class exists to avoid.
          */
         const val PAD_SAMPLES = (SAMPLE_RATE_HZ * 0.24).toInt()
+
+        /**
+         * Gap (in samples) below which two detected segments get bridged
+         * (the raw audio between them kept, not discarded) instead of
+         * treated as two separate utterances. ~700ms — long enough to
+         * cover one swallowed quiet word plus the silence-duration delay
+         * (minSilenceDuration=0.5s above) before VAD reports the gap at
+         * all, short enough that a genuine pause between separate sentences
+         * still gets trimmed as silence.
+         */
+        const val GAP_BRIDGE_SAMPLES = (SAMPLE_RATE_HZ * 0.7).toInt()
     }
 }
