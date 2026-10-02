@@ -81,9 +81,17 @@ class MurmurAccessibilityService : AccessibilityService() {
      * (e.g. continuing a WhatsApp message) doesn't destroy what's there.
      */
     private fun trySetText(node: AccessibilityNodeInfo, text: String): Boolean {
-        val existing = node.text?.toString() ?: ""
-        val selStart = if (node.textSelectionStart >= 0) node.textSelectionStart else existing.length
-        val selEnd = if (node.textSelectionEnd >= 0) node.textSelectionEnd else existing.length
+        // node.text reports the greyed-out placeholder/hint (e.g. WhatsApp's
+        // "Message") as if it were real existing content when the field is
+        // empty -- a known Accessibility-API quirk (hint text is exposed via
+        // getText() so screen readers can announce it). Treating that as
+        // "existing text" and splicing the dictated text after it produced
+        // "MessageHi there." on a real device -- isShowingHintText (API 26+)
+        // is the correct way to detect this and treat the field as empty.
+        val isHint = if (android.os.Build.VERSION.SDK_INT >= 26) node.isShowingHintText else false
+        val existing = if (isHint) "" else (node.text?.toString() ?: "")
+        val selStart = if (!isHint && node.textSelectionStart >= 0) node.textSelectionStart else existing.length
+        val selEnd = if (!isHint && node.textSelectionEnd >= 0) node.textSelectionEnd else existing.length
         val newText = existing.substring(0, selStart) + text + existing.substring(selEnd)
         val newCursor = selStart + text.length
 
