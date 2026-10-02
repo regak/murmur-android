@@ -43,16 +43,31 @@ Goal: hold overlay button → talk → see transcript in Logcat. No injection ye
    path; guarantees injection into any focused field because it *is* the keyboard.
    `InputConnection.commitText` does the actual injection; shares the exact same
    `DictationController` pipeline as `MainActivity` (no duplicated logic).
-8. `AccessibilityService` injector as a secondary/fallback path (for "works
-   even when another keyboard is active" cases), using
-   `ACTION_SET_TEXT` / clipboard+paste fallback — same fallback pattern as
-   the macOS `TextInjector`.
+8. [x] `MurmurAccessibilityService` injector — fallback/general-purpose path for
+   the floating bubble (Phase 3 item, built ahead of schedule — see below),
+   which has no `InputConnection` of its own. Finds the system-wide focused
+   node via `AccessibilityNodeInfo.FOCUS_INPUT` and splices text in at the
+   cursor via `ACTION_SET_TEXT`. Falls back to clipboard+toast if the user
+   hasn't enabled the service yet — a transcript is never silently lost.
 9. [x] `RuleBasedFormatter` (filler stripping, punctuation, capitalization) —
    Kotlin implementation (the macOS Swift source wasn't available in this
    environment, so this re-derives the same role from the README's
    description rather than porting literal code); wired into
    `DictationController` so both `MainActivity` and the IME get formatted
    output automatically.
+
+### Floating bubble ("hanging button") — pulled forward from Phase 3
+
+Requested directly, with a screenshot of Wispr Flow's own floating mic
+button active over WhatsApp: "Can you develop a similar button... so I
+can click and hold". `FloatingBubbleService`: a draggable circular
+overlay (`TYPE_APPLICATION_OVERLAY`), foreground service (survives app
+switches, matches the macOS HUD's non-focus-stealing rule), press-and-hold
+to dictate from literally anywhere, drag to reposition. Delivers text via
+`MurmurAccessibilityService` when enabled, clipboard+toast fallback
+otherwise. This was originally slated as Phase 3 polish but the user's
+actual top want was clearly this trigger mechanism, not the in-app test
+screen — moved up.
 
 ## Phase 3 — Parity features
 

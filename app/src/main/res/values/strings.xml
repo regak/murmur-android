@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Murmur</string>
+    <string name="accessibility_service_description">Lets Murmur\'s floating mic button type dictated text directly into whatever field is focused, in any app. Only active while you use the floating mic button \u2014 Murmur does not read or monitor your screen otherwise.</string>
 </resources>

@@ -45,6 +45,33 @@
                 android:resource="@xml/method" />
         </service>
 
+        <!-- Phase 2 item 8: fallback/general-purpose text injector for the
+             floating bubble, which has no InputConnection of its own (it is
+             not a keyboard). User must enable this manually under Settings,
+             Accessibility, Murmur. Android does not allow a service to
+             enable Accessibility for itself, by design, to prevent abuse. -->
+        <service
+            android:name=".inject.MurmurAccessibilityService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- The "hanging button": a draggable floating mic that stays on top
+             of every other app, press-and-hold to dictate, matching Wispr
+             Flow's floating-button interaction. Foreground service so it
+             survives the user leaving Murmur for another app. -->
+        <service
+            android:name=".overlay.FloatingBubbleService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
     </application>
 
 </manifest>

@@ -7,8 +7,13 @@ import ai.pivotstudio.murmur.android.core.AudioCapture
 import ai.pivotstudio.murmur.android.core.DictationController
 import ai.pivotstudio.murmur.android.core.ModelDownloader
 import ai.pivotstudio.murmur.android.core.SpeechSegmenter
+import ai.pivotstudio.murmur.android.inject.MurmurAccessibilityService
+import ai.pivotstudio.murmur.android.overlay.FloatingBubbleService
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -98,6 +103,14 @@ class MainActivity : ComponentActivity() {
         statusText.value = if (granted) "Hold to talk" else "Mic permission denied"
     }
 
+    private val overlayPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        if (android.provider.Settings.canDrawOverlays(this)) {
+            startFloatingBubbleService()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -124,6 +137,11 @@ class MainActivity : ComponentActivity() {
                             onPressStart = { controller?.startListening(lifecycleScope) },
                             onPressEnd = { controller?.stopListening() },
                             onOpenSettings = { showSettings.value = true },
+                            onStartFloatingBubble = { onStartFloatingBubbleRequested() },
+                            accessibilityEnabled = MurmurAccessibilityService.isEnabled(),
+                            onOpenAccessibilitySettings = {
+                                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            },
                         )
                     }
                 }
@@ -198,6 +216,23 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun onStartFloatingBubbleRequested() {
+        if (Settings.canDrawOverlays(this)) {
+            startFloatingBubbleService()
+        } else {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName"),
+            )
+            overlayPermissionLauncher.launch(intent)
+        }
+    }
+
+    private fun startFloatingBubbleService() {
+        val intent = Intent(this, FloatingBubbleService::class.java)
+        androidx.core.content.ContextCompat.startForegroundService(this, intent)
+    }
 }
 
 @androidx.compose.runtime.Composable
@@ -209,6 +244,9 @@ private fun DictationScreen(
     onPressStart: () -> Unit,
     onPressEnd: () -> Unit,
     onOpenSettings: () -> Unit,
+    onStartFloatingBubble: () -> Unit,
+    accessibilityEnabled: Boolean,
+    onOpenAccessibilitySettings: () -> Unit,
 ) {
     var isHeld by remember { mutableStateOf(false) }
 
@@ -225,6 +263,26 @@ private fun DictationScreen(
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onOpenSettings) { Text("Model: $engineLabel  \u2699") }
+        }
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            Button(onClick = onStartFloatingBubble, modifier = Modifier.fillMaxWidth()) {
+                Text("\uD83C\uDF99 Start floating mic button")
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = if (accessibilityEnabled) {
+                    "Direct-typing (Accessibility) is enabled \u2014 the floating mic will type straight into any app."
+                } else {
+                    "Accessibility not enabled yet \u2014 the floating mic will copy to clipboard instead of typing directly. Tap to enable."
+                },
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .let { if (!accessibilityEnabled) it.pointerInput(Unit) {
+                        detectTapGestures(onTap = { onOpenAccessibilitySettings() })
+                    } else it },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
         }
         Box(
             modifier = Modifier
