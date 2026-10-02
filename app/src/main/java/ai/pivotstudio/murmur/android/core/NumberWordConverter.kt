@@ -14,7 +14,11 @@ package ai.pivotstudio.murmur.android.core
  * - Hundreds/thousands ("nineteen eighty four" -> "1984", "two hundred"
  *   -> "200", "three thousand five hundred" -> "3500")
  * - "oh"/"zero" as a lone digit, common in spoken phone numbers
- *   ("five five oh" -> "5 5 0")
+ *   ("five five oh" -> "550", concatenated with NO space/comma — this
+ *   matches Wispr Flow's behavior: "for sequence numbers... the app
+ *   actually does not leave space or put commas... for phone numbers
+ *   it does not leave space", confirmed via direct user feedback after
+ *   an earlier version wrongly space-separated these digits)
  *
  * Deliberately does NOT touch ordinals ("first", "second"), fractions, or
  * idiomatic number-ish phrases ("a couple", "a few") — those aren't the
@@ -103,10 +107,14 @@ object NumberWordConverter {
         // Heuristic: if every word is a bare unit (0-9) and there are 2+ of
         // them, treat this as digit-by-digit speech (phone numbers, PINs,
         // codes) rather than one big cardinal number -- "five five oh" is a
-        // phone number fragment, not the number 550 collapsed together, and
-        // "five oh" is far more likely spoken digits "5 0" than the sum 5.
+        // phone number fragment, not the number 550 collapsed together via
+        // addition/place-value, but it should still render with NO
+        // separator between digits ("550"), matching how Wispr Flow
+        // renders phone numbers (no space, no comma) as opposed to how it
+        // renders ordinary counted sequences. Confirmed by direct user
+        // feedback after an earlier version wrongly inserted spaces here.
         if (words.size >= 2 && words.all { it in UNITS }) {
-            return words.joinToString(" ") { UNITS.getValue(it).toString() }
+            return words.joinToString("") { UNITS.getValue(it).toString() }
         }
 
         val hasMagnitude = words.any { it == "hundred" || it == "thousand" }
