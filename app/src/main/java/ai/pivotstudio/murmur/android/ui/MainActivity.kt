@@ -212,7 +212,14 @@ private fun DictationScreen(
 ) {
     var isHeld by remember { mutableStateOf(false) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // IMPORTANT: the settings Row and the record-area Box must be LAYOUT
+    // SIBLINGS (Column), not stacked in the same Box. Two full-size Box
+    // children stack by z-order for hit-testing too — the record area
+    // (added after the Row) silently swallowed every tap, including on
+    // the "Model: ... gear" button, so Settings never opened even though
+    // it visually looked like a normal button. Real-device bug report:
+    // "Don't see the parakeet options" — the button was unreachable.
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
             horizontalArrangement = Arrangement.End,
