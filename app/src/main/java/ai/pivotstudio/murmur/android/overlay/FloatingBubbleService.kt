@@ -174,6 +174,17 @@ class FloatingBubbleService : Service(), LifecycleOwner {
                     downParamX = params.x
                     downParamY = params.y
                     isDragging = false
+                    // Start recording immediately on press, not on a later
+                    // ACTION_MOVE. A steady hold with zero finger movement
+                    // never generates a MOVE event at all, so gating the
+                    // start on MOVE meant holding still (the normal way to
+                    // press a button) silently recorded nothing for the
+                    // whole hold -- recording only began, for an instant,
+                    // on release. Real-device bug report: "when clicked it
+                    // does not type... pasted it just O" (a single garbage
+                    // character from that near-zero-length capture).
+                    isHeld = true
+                    startDictating(bubble)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -182,8 +193,10 @@ class FloatingBubbleService : Service(), LifecycleOwner {
                     if (!isDragging && (abs(dx) > DRAG_THRESHOLD_PX || abs(dy) > DRAG_THRESHOLD_PX)) {
                         isDragging = true
                         if (isHeld) {
-                            // Movement after a hold started: still dragging, not
-                            // recording — stop any in-progress capture cleanly.
+                            // Movement past the threshold means this is a drag,
+                            // not a hold-to-talk -- cancel the recording that
+                            // started on ACTION_DOWN rather than transcribing
+                            // whatever was captured during the drag gesture.
                             stopDictating()
                             isHeld = false
                         }
@@ -192,9 +205,6 @@ class FloatingBubbleService : Service(), LifecycleOwner {
                         params.x = downParamX + dx.toInt()
                         params.y = downParamY + dy.toInt()
                         windowManager.updateViewLayout(view, params)
-                    } else if (!isHeld) {
-                        isHeld = true
-                        startDictating(bubble)
                     }
                     true
                 }
@@ -202,12 +212,6 @@ class FloatingBubbleService : Service(), LifecycleOwner {
                     if (isHeld) {
                         stopDictating()
                         isHeld = false
-                    } else if (!isDragging) {
-                        // A plain tap with no movement: still start dictating on
-                        // ACTION_DOWN->no-move->UP, matching press-and-hold where
-                        // the hold was very short (tap-and-release quickly).
-                        startDictating(bubble)
-                        stopDictating()
                     }
                     isDragging = false
                     true
