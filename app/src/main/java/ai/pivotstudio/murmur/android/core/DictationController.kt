@@ -56,13 +56,15 @@ class DictationController(
     var state: State = State.IDLE
         private set
 
-    /** Called when the user presses the overlay bubble / holds the trigger. */
-    fun startListening(scope: CoroutineScope) {
+    /** Called when the user presses the overlay bubble / holds the trigger.
+     * [onAmplitude] (optional) is forwarded from [AudioCapture] for live
+     * waveform/level UI while listening — see [AudioCapture.start]. */
+    fun startListening(scope: CoroutineScope, onAmplitude: (Float) -> Unit = {}) {
         check(state == State.IDLE) { "startListening() called while state=$state" }
         state = State.LISTENING
         segmenter.reset()
 
-        val chunks = audioCapture.start(scope)
+        val chunks = audioCapture.start(scope, onAmplitude)
         val collected = ArrayList<Short>()
 
         scope.launch {

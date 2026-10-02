@@ -19,14 +19,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleCoroutineScope
@@ -67,6 +66,13 @@ import kotlinx.coroutines.launch
  * threshold ([DRAG_THRESHOLD_PX]) distinguishes "the user is moving the
  * bubble" from "the user pressed to start dictating", exactly like Wispr
  * Flow's own bubble (and most floating-button overlays) behave.
+ *
+ * Live waveform visual ([DictationWaveBubbleView]): requested directly —
+ * "when I press it should show like a progress of while I'm talking and
+ * when I stop it somehow like goes away", with a screenshot of Wispr
+ * Flow's own pulsing ring. [AudioCapture]'s onAmplitude callback feeds
+ * live mic loudness into the bubble view in real time while LISTENING;
+ * on release the ring animates back down instead of vanishing instantly.
  */
 class FloatingBubbleService : Service(), LifecycleOwner {
 
@@ -75,8 +81,9 @@ class FloatingBubbleService : Service(), LifecycleOwner {
     private val serviceScope: LifecycleCoroutineScope get() = lifecycleScope
 
     private lateinit var windowManager: WindowManager
-    private var bubbleView: TextView? = null
-    private var layoutParams: WindowManager.LayoutParams? = null
+    private var bubbleContainer: FrameLayout? = null
+    private var waveView: DictationWaveBubbleView? = null
+    private var statusOverlay: TextView? = null
 
     private var controller: DictationController? = null
     private var isEngineReady = false
@@ -135,20 +142,30 @@ class FloatingBubbleService : Service(), LifecycleOwner {
     }
 
     private fun addBubble() {
-        val bubble = TextView(this).apply {
-            text = "\uD83C\uDF99"
+        val wave = DictationWaveBubbleView(this)
+        val status = TextView(this).apply {
             textSize = 22f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#FF3949AB"))
-            }
+            visibility = android.view.View.GONE
+        }
+        val container = FrameLayout(this).apply {
+            addView(
+                wave,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+            )
+            addView(
+                status,
+                FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+            )
         }
 
+        // Extra padding beyond the bubble's own radius so the live
+        // amplitude ring has room to expand without getting clipped by the
+        // overlay window's bounds.
         val params = WindowManager.LayoutParams(
-            BUBBLE_SIZE_PX,
-            BUBBLE_SIZE_PX,
+            RING_AREA_PX,
+            RING_AREA_PX,
             overlayWindowType(),
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
@@ -166,7 +183,7 @@ class FloatingBubbleService : Service(), LifecycleOwner {
         var isDragging = false
         var isHeld = false
 
-        bubble.setOnTouchListener { view, event ->
+        container.setOnTouchListener { view, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
                     downRawX = event.rawX
@@ -184,7 +201,7 @@ class FloatingBubbleService : Service(), LifecycleOwner {
                     // does not type... pasted it just O" (a single garbage
                     // character from that near-zero-length capture).
                     isHeld = true
-                    startDictating(bubble)
+                    startDictating()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
@@ -220,9 +237,10 @@ class FloatingBubbleService : Service(), LifecycleOwner {
             }
         }
 
-        windowManager.addView(bubble, params)
-        bubbleView = bubble
-        layoutParams = params
+        windowManager.addView(container, params)
+        bubbleContainer = container
+        waveView = wave
+        statusOverlay = status
     }
 
     private fun overlayWindowType(): Int =
@@ -242,7 +260,7 @@ class FloatingBubbleService : Service(), LifecycleOwner {
                 // via the main app or the IME — a silent multi-hundred-MB
                 // download with no UI to show progress on would be a bad
                 // surprise. Bail out with a clear signal instead.
-                bubbleView?.text = "\u26A0"
+                showStatusSymbol("\u26A0")
                 Log.w(TAG, "Model ${selected.name} not downloaded yet; open the Murmur app first")
                 return@launch
             }
@@ -254,29 +272,34 @@ class FloatingBubbleService : Service(), LifecycleOwner {
                 controller = DictationController(audioCapture, engine, segmenter) { result ->
                     when (result) {
                         is DictationController.Result.Transcript -> deliverText(result.text)
-                        is DictationController.Result.NoSpeechDetected -> flashBubble("\uD83C\uDF99")
+                        is DictationController.Result.NoSpeechDetected -> flashStatusSymbol("\uD83C\uDF99")
                         is DictationController.Result.Error -> {
                             Log.e(TAG, "Bubble transcription error: ${result.message}")
-                            flashBubble("\u26A0")
+                            flashStatusSymbol("\u26A0")
                         }
                     }
                 }
                 isEngineReady = true
             } catch (e: Exception) {
                 Log.e(TAG, "Bubble engine load failed", e)
-                bubbleView?.text = "\u26A0"
+                showStatusSymbol("\u26A0")
             }
         }
     }
 
-    private fun startDictating(bubble: TextView) {
+    private fun startDictating() {
         if (!isEngineReady) return
-        bubble.text = "\u25CF" // solid dot: recording indicator
-        controller?.startListening(serviceScope)
+        hideStatusSymbol()
+        waveView?.setListening(true)
+        controller?.startListening(serviceScope) { amplitude ->
+            // onAmplitude fires on AudioCapture's IO dispatcher thread —
+            // View updates must happen on the main thread.
+            waveView?.post { waveView?.setAmplitude(amplitude) }
+        }
     }
 
     private fun stopDictating() {
-        bubbleView?.text = "\uD83C\uDF99"
+        waveView?.setListening(false)
         controller?.stopListening()
     }
 
@@ -291,7 +314,7 @@ class FloatingBubbleService : Service(), LifecycleOwner {
         val service = MurmurAccessibilityService.instance
         val injected = service?.insertTextAtCursor("$text ") ?: false
         if (injected) {
-            flashBubble("\u2713")
+            flashStatusSymbol("\u2713")
             return
         }
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -301,17 +324,26 @@ class FloatingBubbleService : Service(), LifecycleOwner {
             "Copied to clipboard (enable Accessibility for direct typing): \"$text\"",
             android.widget.Toast.LENGTH_LONG,
         ).show()
-        flashBubble("\uD83D\uDCCB")
+        flashStatusSymbol("\uD83D\uDCCB")
     }
 
-    private fun flashBubble(symbol: String) {
-        bubbleView?.text = symbol
-        bubbleView?.postDelayed({ bubbleView?.text = "\uD83C\uDF99" }, 900)
+    private fun showStatusSymbol(symbol: String) {
+        statusOverlay?.text = symbol
+        statusOverlay?.visibility = android.view.View.VISIBLE
+    }
+
+    private fun hideStatusSymbol() {
+        statusOverlay?.visibility = android.view.View.GONE
+    }
+
+    private fun flashStatusSymbol(symbol: String) {
+        showStatusSymbol(symbol)
+        statusOverlay?.postDelayed({ hideStatusSymbol() }, 900)
     }
 
     override fun onDestroy() {
         controller?.stopListening()
-        bubbleView?.let { runCatching { windowManager.removeView(it) } }
+        bubbleContainer?.let { runCatching { windowManager.removeView(it) } }
         lifecycleRegistry.handleLifecycleEvent(androidx.lifecycle.Lifecycle.Event.ON_DESTROY)
         super.onDestroy()
     }
@@ -321,7 +353,9 @@ class FloatingBubbleService : Service(), LifecycleOwner {
     companion object {
         private const val TAG = "Murmur/Bubble"
         private const val NOTIFICATION_ID = 1001
-        private const val BUBBLE_SIZE_PX = 150
+        /** Overlay window size — bigger than the bubble itself so the live
+         * amplitude ring has room to expand without clipping at the edges. */
+        private const val RING_AREA_PX = 260
         private const val DRAG_THRESHOLD_PX = 20
         const val ACTION_STOP = "ai.pivotstudio.murmur.android.overlay.STOP"
     }

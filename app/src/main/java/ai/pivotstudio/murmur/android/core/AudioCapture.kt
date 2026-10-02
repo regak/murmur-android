@@ -40,9 +40,15 @@ class AudioCapture(private val context: Context) {
      * Starts capture and returns a channel the caller drains until the
      * utterance ends (e.g. button release). Call [stop] to close the mic
      * and the channel.
+     *
+     * [onAmplitude] (optional) is invoked on each chunk with a 0f-1f
+     * normalized loudness value — purely for live UI feedback (e.g. the
+     * floating bubble's listening animation, see
+     * [ai.pivotstudio.murmur.android.overlay.FloatingBubbleService]); it
+     * has no effect on the actual audio passed to the ASR pipeline.
      */
     @SuppressLint("MissingPermission") // caller must check hasMicPermission() first
-    fun start(scope: CoroutineScope): ReceiveChannel<ShortArray> {
+    fun start(scope: CoroutineScope, onAmplitude: (Float) -> Unit = {}): ReceiveChannel<ShortArray> {
         check(hasMicPermission()) { "RECORD_AUDIO permission not granted" }
 
         val minBufferSize = AudioRecord.getMinBufferSize(
@@ -73,12 +79,23 @@ class AudioCapture(private val context: Context) {
                     // on the next call, same "buffers copied, never borrowed" rule
                     // as the macOS AudioCapture.
                     channel.send(buffer.copyOf(read))
+                    onAmplitude(peakAmplitude(buffer, read))
                 }
             }
             channel.close()
         }
 
         return channel
+    }
+
+    /** Peak sample magnitude in [buffer], normalized to roughly 0f-1f. */
+    private fun peakAmplitude(buffer: ShortArray, len: Int): Float {
+        var peak = 0
+        for (i in 0 until len) {
+            val abs = kotlin.math.abs(buffer[i].toInt())
+            if (abs > peak) peak = abs
+        }
+        return (peak / 32768f).coerceIn(0f, 1f)
     }
 
     fun stop() {
