@@ -10,7 +10,8 @@ import kotlinx.coroutines.Dispatchers
 
 /**
  * Phase 1 state machine: press-and-hold -> accumulate audio -> VAD trims
- * silence -> release -> transcribe -> log. No text injection yet (Phase 2).
+ * silence -> release -> transcribe -> report result. No text injection yet
+ * (Phase 2).
  *
  * Mirrors the macOS `DictationController`'s
  * `starting -> listening -> finishing -> idle` shape, minus the injection step.
@@ -19,13 +20,27 @@ import kotlinx.coroutines.Dispatchers
  * before it reaches the ASR engine (see [SpeechSegmenter] for why — it also
  * means a user who holds the button, pauses, then talks isn't billed encoder
  * time for the pause, and doesn't get silence mis-transcribed as noise).
+ *
+ * [onResult] is how the caller (MainActivity) finds out what happened —
+ * earlier Phase 1 builds only Log.i'd the transcript, which is invisible
+ * on a real device with no way to view Logcat, and looked indistinguishable
+ * from "transcription silently did nothing". Every path (success, no
+ * speech detected, or an exception from the engine) now reports through
+ * this callback so the UI always shows *something*.
  */
 class DictationController(
     private val audioCapture: AudioCapture,
     private val engine: TranscriptionEngine,
     private val segmenter: SpeechSegmenter,
+    private val onResult: (Result) -> Unit = {},
 ) {
     enum class State { IDLE, LISTENING, FINISHING }
+
+    sealed class Result {
+        data class Transcript(val text: String) : Result()
+        object NoSpeechDetected : Result()
+        data class Error(val message: String) : Result()
+    }
 
     var state: State = State.IDLE
         private set
@@ -54,11 +69,20 @@ class DictationController(
 
             if (speechOnly.isEmpty()) {
                 Log.i(TAG, "No speech detected (silence or button tap too short)")
+                onResult(Result.NoSpeechDetected)
             } else {
                 Log.i(TAG, "VAD kept ${speechOnly.size}/${raw.size} samples")
-                val text = engine.transcribe(speechOnly)
-                Log.i(TAG, "Transcript: \"$text\"")
-                // Phase 2 TODO: TextFormatter -> TextInjector here.
+                try {
+                    val text = engine.transcribe(speechOnly)
+                    Log.i(TAG, "Transcript: \"$text\"")
+                    onResult(
+                        if (text.isBlank()) Result.NoSpeechDetected else Result.Transcript(text),
+                    )
+                    // Phase 2 TODO: TextFormatter -> TextInjector here.
+                } catch (e: Exception) {
+                    Log.e(TAG, "Transcription failed", e)
+                    onResult(Result.Error(e.message ?: e.toString()))
+                }
             }
             state = State.IDLE
         }

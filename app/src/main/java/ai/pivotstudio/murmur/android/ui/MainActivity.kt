@@ -27,15 +27,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
 /**
  * Phase 1 proof-of-concept screen: press and hold anywhere to record, release
- * to transcribe. Output goes to Logcat (tag "Murmur/Dictation") and is also
- * mirrored on-screen for convenience during bring-up.
+ * to transcribe. The transcript is shown directly on screen (not just
+ * Logcat) — an earlier build only Log.i'd it, which is invisible on a real
+ * device with no way to view Logcat and looked exactly like "transcription
+ * does nothing" (confirmed by real-device testing). [DictationController]'s
+ * onResult callback now drives [lastResult], which this screen renders.
  *
  * First launch runs a download gate: [ModelDownloader] fetches the ~120MB
  * Moonshine + Silero VAD model files from the repo's GitHub Release into
@@ -63,6 +68,7 @@ class MainActivity : ComponentActivity() {
     private var controller: DictationController? = null
     private var statusText = mutableStateOf("Preparing...")
     private var downloadProgress = mutableStateOf<Float?>(null)
+    private var lastResult = mutableStateOf("")
 
     private val requestMicPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -81,6 +87,7 @@ class MainActivity : ComponentActivity() {
                     DictationScreen(
                         status = statusText.value,
                         downloadProgress = downloadProgress.value,
+                        lastResult = lastResult.value,
                         onPressStart = { controller?.startListening(lifecycleScope) },
                         onPressEnd = { controller?.stopListening() },
                     )
@@ -122,7 +129,15 @@ class MainActivity : ComponentActivity() {
                 statusText.value = "Engine load failed: ${e.message}. Try reinstalling."
                 return@launch
             }
-            controller = DictationController(audioCapture, engine, segmenter)
+            controller = DictationController(audioCapture, engine, segmenter) { result ->
+                lastResult.value = when (result) {
+                    is DictationController.Result.Transcript -> result.text
+                    is DictationController.Result.NoSpeechDetected ->
+                        "(no speech detected — try holding longer / speaking louder)"
+                    is DictationController.Result.Error ->
+                        "Transcription error: ${result.message}"
+                }
+            }
 
             statusText.value = if (audioCapture.hasMicPermission()) {
                 "Hold to talk"
@@ -138,6 +153,7 @@ class MainActivity : ComponentActivity() {
 private fun DictationScreen(
     status: String,
     downloadProgress: Float?,
+    lastResult: String,
     onPressStart: () -> Unit,
     onPressEnd: () -> Unit,
 ) {
@@ -167,6 +183,14 @@ private fun DictationScreen(
                 LinearProgressIndicator(
                     progress = { downloadProgress },
                     modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+                )
+            }
+            if (!isHeld && downloadProgress == null && lastResult.isNotEmpty()) {
+                Text(
+                    text = lastResult,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.padding(top = 32.dp),
                 )
             }
         }
