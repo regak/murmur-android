@@ -45,43 +45,84 @@ class MurmurAccessibilityService : AccessibilityService() {
 
     /**
      * Inserts [text] at the current cursor position in whichever node is
-     * focused for input, system-wide (any app). Returns true if a focused
-     * editable node was found and the insert succeeded.
+     * focused for input, system-wide (any app).
      *
+     * Tries [AccessibilityNodeInfo.ACTION_SET_TEXT] first (fast, no visible
+     * clipboard flash) — but many apps, WhatsApp included, silently reject
+     * or partially ignore a raw ACTION_SET_TEXT because it bypasses their
+     * own text-input/validation pipeline (their EditText's TextWatcher
+     * never fires the way it does for a real keyboard commit or an actual
+     * paste gesture). Confirmed via real-device report: manually copying a
+     * transcript to the clipboard and pasting worked fine, but automatic
+     * ACTION_SET_TEXT into the same field did not. Since paste is proven to
+     * work there, [ACTION_PASTE] is the reliable fallback: put [text] on
+     * the clipboard, then fire the field's own paste action via
+     * Accessibility — the exact same gesture the user performed manually,
+     * just triggered programmatically instead of a long-press menu tap.
+     *
+     * Returns true if a focused editable node was found and either path
+     * succeeded.
+     */
+    fun insertTextAtCursor(text: String): Boolean {
+        val node = findFocusedEditableNode() ?: return false
+        return try {
+            if (trySetText(node, text)) return true
+            tryPaste(node, text)
+        } finally {
+            node.recycle()
+        }
+    }
+
+    /**
      * Appends rather than replaces: finds the focused node's existing text
      * and cursor/selection position, and splices [text] in at that point —
      * matches how a real keyboard's commitText behaves (insert, not
      * overwrite), so dictating into a field that already has text in it
      * (e.g. continuing a WhatsApp message) doesn't destroy what's there.
      */
-    fun insertTextAtCursor(text: String): Boolean {
-        val node = findFocusedEditableNode() ?: return false
-        return try {
-            val existing = node.text?.toString() ?: ""
-            val selStart = if (node.textSelectionStart >= 0) node.textSelectionStart else existing.length
-            val selEnd = if (node.textSelectionEnd >= 0) node.textSelectionEnd else existing.length
-            val newText = existing.substring(0, selStart) + text + existing.substring(selEnd)
-            val newCursor = selStart + text.length
+    private fun trySetText(node: AccessibilityNodeInfo, text: String): Boolean {
+        val existing = node.text?.toString() ?: ""
+        val selStart = if (node.textSelectionStart >= 0) node.textSelectionStart else existing.length
+        val selEnd = if (node.textSelectionEnd >= 0) node.textSelectionEnd else existing.length
+        val newText = existing.substring(0, selStart) + text + existing.substring(selEnd)
+        val newCursor = selStart + text.length
 
-            val arguments = android.os.Bundle().apply {
-                putCharSequence(
-                    AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                    newText,
-                )
-            }
-            val setOk = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-
-            if (setOk) {
-                val selectionArgs = android.os.Bundle().apply {
-                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newCursor)
-                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newCursor)
-                }
-                node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectionArgs)
-            }
-            setOk
-        } finally {
-            node.recycle()
+        val arguments = android.os.Bundle().apply {
+            putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                newText,
+            )
         }
+        val setOk = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+        if (setOk) {
+            val selectionArgs = android.os.Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, newCursor)
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, newCursor)
+            }
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectionArgs)
+        }
+        return setOk
+    }
+
+    /**
+     * Clipboard + ACTION_PASTE fallback — see [insertTextAtCursor] doc.
+     * Restores whatever was previously on the clipboard afterward, since
+     * silently overwriting the user's actual clipboard contents would be
+     * a surprising side effect of just dictating.
+     */
+    private fun tryPaste(node: AccessibilityNodeInfo, text: String): Boolean {
+        val clipboard = getSystemService(android.content.ClipboardManager::class.java)
+        val previousClip = clipboard.primaryClip
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Murmur dictation", text))
+        val pasted = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        if (previousClip != null) {
+            // Restore slightly later — replacing it immediately can race
+            // with the paste action actually reading the clipboard.
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                runCatching { clipboard.setPrimaryClip(previousClip) }
+            }, 500)
+        }
+        return pasted
     }
 
     private fun findFocusedEditableNode(): AccessibilityNodeInfo? {
