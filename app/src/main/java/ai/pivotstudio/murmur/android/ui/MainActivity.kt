@@ -45,13 +45,22 @@ import kotlinx.coroutines.launch
  * Subsequent launches skip straight to loading since the files already
  * exist on disk (see [ModelDownloader.isComplete]).
  *
+ * IMPORTANT: [SherpaMoonshineEngine] and [SpeechSegmenter] both construct
+ * native sherpa-onnx objects that eagerly open their model files from disk.
+ * They must NOT be constructed until after the download gate confirms the
+ * files exist — constructing them against missing files crashes natively
+ * (not a catchable Kotlin exception) and takes the whole process down,
+ * which looks like "the app opens then instantly closes". This was exactly
+ * the bug in the first release of this screen: both were built in onCreate()
+ * before the download ever ran.
+ *
  * This is NOT the shipping UI (no overlay bubble, no background service) —
  * see PLAN.md Phase 1 item 6 for what "done" means here, and Phase 2 for
  * the real floating-bubble + IME trigger.
  */
 class MainActivity : ComponentActivity() {
 
-    private lateinit var controller: DictationController
+    private var controller: DictationController? = null
     private var statusText = mutableStateOf("Preparing...")
     private var downloadProgress = mutableStateOf<Float?>(null)
 
@@ -64,11 +73,20 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val audioCapture = AudioCapture(this)
-        val engine = SherpaMoonshineEngine(this)
-        val segmenter = SpeechSegmenter(this)
         val downloader = ModelDownloader(this)
-        controller = DictationController(audioCapture, engine, segmenter)
+
+        setContent {
+            MaterialTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    DictationScreen(
+                        status = statusText.value,
+                        downloadProgress = downloadProgress.value,
+                        onPressStart = { controller?.startListening(lifecycleScope) },
+                        onPressEnd = { controller?.stopListening() },
+                    )
+                }
+            }
+        }
 
         lifecycleScope.launch {
             if (!downloader.isComplete()) {
@@ -91,26 +109,26 @@ class MainActivity : ComponentActivity() {
                 }
             }
             downloadProgress.value = null
+
+            // Safe to construct native sherpa-onnx objects now — files exist on disk.
             statusText.value = "Loading Moonshine Tiny EN..."
-            engine.load()
+            val audioCapture = AudioCapture(this@MainActivity)
+            val engine = SherpaMoonshineEngine(this@MainActivity)
+            val segmenter = SpeechSegmenter(this@MainActivity)
+            try {
+                engine.load()
+            } catch (e: Exception) {
+                Log.e("Murmur/Engine", "Failed to load ASR engine", e)
+                statusText.value = "Engine load failed: ${e.message}. Try reinstalling."
+                return@launch
+            }
+            controller = DictationController(audioCapture, engine, segmenter)
+
             statusText.value = if (audioCapture.hasMicPermission()) {
                 "Hold to talk"
             } else {
                 requestMicPermission.launch(Manifest.permission.RECORD_AUDIO)
                 "Requesting mic permission..."
-            }
-        }
-
-        setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    DictationScreen(
-                        status = statusText.value,
-                        downloadProgress = downloadProgress.value,
-                        onPressStart = { controller.startListening(lifecycleScope) },
-                        onPressEnd = { controller.stopListening() },
-                    )
-                }
             }
         }
     }
