@@ -21,6 +21,17 @@ import kotlinx.coroutines.Dispatchers
  * means a user who holds the button, pauses, then talks isn't billed encoder
  * time for the pause, and doesn't get silence mis-transcribed as noise).
  *
+ * [AudioGain.normalize] runs on the raw buffer BEFORE the VAD/segmenter —
+ * this is the fix for words dropped specifically because they were spoken
+ * quietly (as opposed to dropped at segment boundaries, which is what
+ * [SpeechSegmenter]'s padding/bridging fixes). A quiet word's energy can
+ * stay under VAD's detection threshold for its entire duration, meaning
+ * VAD never classifies it as speech at all — no amount of padding or
+ * bridging after the fact can recover audio that was never flagged as a
+ * segment in the first place. Boosting the whole recording's volume
+ * toward a consistent target before VAD ever sees it (same fix cloud
+ * dictation tools like Wispr Flow use) is what actually addresses that.
+ *
  * [onResult] is how the caller (MainActivity) finds out what happened —
  * earlier Phase 1 builds only Log.i'd the transcript, which is invisible
  * on a real device with no way to view Logcat, and looked indistinguishable
@@ -62,7 +73,8 @@ class DictationController(
             val raw = collected.toShortArray()
             val speechOnly = withContext(Dispatchers.Default) {
                 if (raw.isEmpty()) raw else {
-                    segmenter.accept(raw)
+                    val normalized = AudioGain.normalize(raw)
+                    segmenter.accept(normalized)
                     segmenter.extractSpeech()
                 }
             }
