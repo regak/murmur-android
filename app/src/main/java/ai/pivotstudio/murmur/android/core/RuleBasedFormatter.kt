@@ -46,6 +46,10 @@ object RuleBasedFormatter {
         text = text.replace(Regex("\\s+"), " ").trim()
         if (text.isEmpty()) return text
 
+        // Convert spoken numbers to digits ("twenty five" -> "25"), e.g.
+        // for typing phone numbers/addresses into Contacts via dictation.
+        text = NumberWordConverter.convert(text)
+
         // Capitalize first letter.
         text = text[0].uppercaseChar() + text.substring(1)
 
