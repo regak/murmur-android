@@ -39,14 +39,20 @@ Goal: hold overlay button → talk → see transcript in Logcat. No injection ye
 
 ## Phase 2 — Text injection
 
-7. Custom IME shell (`InputMethodService`) with a mic key — primary injection
+7. [x] Custom IME shell (`MurmurInputMethodService`) with a mic key — primary injection
    path; guarantees injection into any focused field because it *is* the keyboard.
+   `InputConnection.commitText` does the actual injection; shares the exact same
+   `DictationController` pipeline as `MainActivity` (no duplicated logic).
 8. `AccessibilityService` injector as a secondary/fallback path (for "works
    even when another keyboard is active" cases), using
    `ACTION_SET_TEXT` / clipboard+paste fallback — same fallback pattern as
    the macOS `TextInjector`.
-9. Port `RuleBasedFormatter` (filler stripping, punctuation, capitalization)
-   from the macOS Swift implementation; wire ASR output → formatter → injector.
+9. [x] `RuleBasedFormatter` (filler stripping, punctuation, capitalization) —
+   Kotlin implementation (the macOS Swift source wasn't available in this
+   environment, so this re-derives the same role from the README's
+   description rather than porting literal code); wired into
+   `DictationController` so both `MainActivity` and the IME get formatted
+   output automatically.
 
 ## Phase 3 — Parity features
 

@@ -85,12 +85,12 @@ class DictationController(
             } else {
                 Log.i(TAG, "VAD kept ${speechOnly.size}/${raw.size} samples")
                 try {
-                    val text = engine.transcribe(speechOnly)
-                    Log.i(TAG, "Transcript: \"$text\"")
+                    val rawText = engine.transcribe(speechOnly)
+                    val text = RuleBasedFormatter.format(rawText)
+                    Log.i(TAG, "Transcript: \"$rawText\" -> formatted: \"$text\"")
                     onResult(
                         if (text.isBlank()) Result.NoSpeechDetected else Result.Transcript(text),
                     )
-                    // Phase 2 TODO: TextFormatter -> TextInjector here.
                 } catch (e: Exception) {
                     Log.e(TAG, "Transcription failed", e)
                     onResult(Result.Error(e.message ?: e.toString()))

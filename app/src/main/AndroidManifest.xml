@@ -28,6 +28,23 @@
         <!-- Phase 1: foreground service hosting the overlay bubble + mic capture
              while recording. Added once DictationController exists. -->
 
+        <!-- Phase 2: custom keyboard (IME), primary text-injection path.
+             Enabled by the user under Settings, System, Languages and input,
+             On-screen keyboard, Manage keyboards, then switched to from any
+             text field's keyboard-switcher (globe icon / long-press space). -->
+        <service
+            android:name=".ime.MurmurInputMethodService"
+            android:exported="true"
+            android:permission="android.permission.BIND_INPUT_METHOD"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
     </application>
 
 </manifest>
