@@ -10,7 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Default ASR engine: Moonshine Tiny EN, INT8, via sherpa-onnx.
+ * Moonshine Tiny EN, INT8, via sherpa-onnx — the default/fastest ASR engine.
  *
  * Chosen over Whisper/Parakeet/Zipformer-streaming for raw speed to match
  * Wispr Flow's snappy feel on a phone CPU — see README.md for the
@@ -18,12 +18,14 @@ import kotlinx.coroutines.withContext
  * fastest of 16 models in the public voiceping.net on-device ASR benchmark).
  *
  * English-only by design for v1 (Swahili/multilingual explicitly deferred,
- * see PLAN.md).
+ * see PLAN.md). [SherpaParakeetEngine] is the alternative, more-accurate
+ * engine — see [EngineId] for the full swappable-model registry and
+ * MainActivity's settings screen for where the user picks.
  *
  * Model files are NOT bundled in the APK (that made the download ~140MB+
  * for a ~120MB model that Wispr Flow doesn't even ship, since Wispr Flow
  * is cloud-based). Instead [ModelDownloader] fetches them into app-private
- * storage on first launch, and this engine loads from that filesystem path
+ * storage on first use, and this engine loads from that filesystem path
  * via sherpa-onnx's `assetManager = null` / file-path constructor mode —
  * see MainActivity for the download-gate that runs before load().
  */
@@ -36,7 +38,7 @@ class SherpaMoonshineEngine(
     private var recognizer: OfflineRecognizer? = null
 
     override suspend fun load() = withContext(Dispatchers.IO) {
-        val modelDir = ModelDownloader(context).moonshineDir.absolutePath
+        val modelDir = ModelDownloader(context).dirFor(EngineId.MOONSHINE_TINY_EN).absolutePath
         val config = OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
                 moonshine = OfflineMoonshineModelConfig(
